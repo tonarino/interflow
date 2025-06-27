@@ -13,6 +13,7 @@ use std::rc::Rc;
 pub struct PipewireDevice {
     pub(super) target_node: Option<u32>,
     pub device_type: DeviceType,
+    pub object_serial: Option<String>,
     pub stream_name: Cow<'static, str>,
 }
 
@@ -77,7 +78,12 @@ impl AudioInputDevice for PipewireDevice {
         stream_config: StreamConfig,
         callback: Callback,
     ) -> Result<Self::StreamHandle<Callback>, Self::Error> {
-        StreamHandle::new_input(&self.stream_name, stream_config, callback)
+        StreamHandle::new_input(
+            self.object_serial.clone(),
+            &self.stream_name,
+            stream_config,
+            callback,
+        )
     }
 }
 
@@ -98,7 +104,12 @@ impl AudioOutputDevice for PipewireDevice {
         stream_config: StreamConfig,
         callback: Callback,
     ) -> Result<Self::StreamHandle<Callback>, Self::Error> {
-        StreamHandle::new_output(&self.stream_name, stream_config, callback)
+        StreamHandle::new_output(
+            self.object_serial.clone(),
+            &self.stream_name,
+            stream_config,
+            callback,
+        )
     }
 }
 
