@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 enum StreamCommands<Callback> {
     ReceiveCallback(Callback),
@@ -271,6 +272,12 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
                 &mut params,
             )?;
             log::debug!("Starting Pipewire main loop");
+
+            let timer_source = main_loop
+                .loop_()
+                .add_timer(|n| log::info!("strohel timer fired, n: {n})"));
+            timer_source.update_timer(Some(Duration::from_secs(1)), Some(Duration::from_secs(1)));
+
             main_loop.run();
             Ok::<_, PipewireError>(())
         });
