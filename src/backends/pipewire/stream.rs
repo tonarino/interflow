@@ -182,6 +182,7 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
 
             let stream = Stream::new(&core, &name, properties)?;
             config.samplerate = config.samplerate.round();
+            log::info!("strohel special interflow StreamHandle");
             let _listener = stream
                 .add_local_listener_with_user_data(StreamInner {
                     callback: None,
@@ -211,6 +212,40 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
                         log::warn!("No buffer available");
                     }
                 })
+                .state_changed(|stream, _inner, state_1, state_2| {
+                    log::info!(
+                        "strohel state_changed: {}, {state_1:?}, {state_2:?}",
+                        stream.node_id()
+                    );
+                })
+                .control_info(|stream, _inner, i, control| {
+                    log::info!(
+                        "strohel control_info: {}, {i}, {control:?}",
+                        stream.node_id()
+                    );
+                })
+                .io_changed(|stream, _inner, i, pointer, j| {
+                    log::info!(
+                        "strohel io_changed: {}, {i}, {pointer:?}, {j}",
+                        stream.node_id()
+                    );
+                })
+                .param_changed(|stream, _inner, i, pod| {
+                    log::info!(
+                        "strohel param_changed: {}, {i}, pod omitted",
+                        stream.node_id()
+                    );
+                })
+                .add_buffer(|stream, _inner, buffer| {
+                    log::info!("strohel add_buffer: {}, {buffer:?}", stream.node_id());
+                })
+                .remove_buffer(|stream, _inner, buffer| {
+                    log::info!("strohel remove_buffer: {}, {buffer:?}", stream.node_id());
+                })
+                .drained(|stream, _inner| {
+                    log::info!("strohel drained: {}", stream.node_id());
+                })
+                // drained()
                 .register()?;
             let values = pipewire::spa::pod::serialize::PodSerializer::serialize(
                 std::io::Cursor::new(Vec::new()),
