@@ -17,9 +17,12 @@ use pipewire::main_loop::{MainLoop, WeakMainLoop};
 use pipewire::properties::Properties;
 use pipewire::stream::{Stream, StreamFlags};
 use std::collections::HashMap;
-use std::fmt;
 use std::fmt::Formatter;
+use std::ops::DerefMut;
+use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::JoinHandle;
+use std::time::Duration;
+use std::{fmt, thread};
 
 enum StreamCommands<Callback> {
     ReceiveCallback(Callback),
@@ -156,7 +159,7 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
             + 'static,
     ) -> Result<Self, PipewireError> {
         let (mut tx, rx) = rtrb::RingBuffer::new(16);
-        let handle = std::thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let main_loop = MainLoop::new(None)?;
             let context = Context::new(&main_loop)?;
             let core = context.connect(None)?;
@@ -182,17 +185,25 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
 
             let stream = Stream::new(&core, &name, properties)?;
             config.samplerate = config.samplerate.round();
+
+            let stream_inner = StreamInner {
+                callback: None,
+                commands: rx,
+                scratch_buffer: vec![0.0; MAX_FRAMES * channels].into_boxed_slice(),
+                loop_ref: main_loop.downgrade(),
+                config,
+                timestamp: Timestamp::new(config.samplerate),
+            };
+            // NB(strohel): pipewire-rs API is unsound: it doesn't require the callbacks to be Send
+            // nor Sync, yet it calls them from different threads (verified empirically). Use
+            // Arc, Mutex for thread safety, even though Rc, RefCell would typecheck.
+            let stream_inner = Arc::new(Mutex::new(stream_inner));
+
             let _listener = stream
-                .add_local_listener_with_user_data(StreamInner {
-                    callback: None,
-                    commands: rx,
-                    scratch_buffer: vec![0.0; MAX_FRAMES * channels].into_boxed_slice(),
-                    loop_ref: main_loop.downgrade(),
-                    config,
-                    timestamp: Timestamp::new(config.samplerate),
-                })
+                .add_local_listener_with_user_data(Arc::clone(&stream_inner))
                 .process(move |stream, inner| {
-                    log::debug!("Processing stream");
+                    log::debug!("Processing stream from thread {:?}", thread::current().id());
+                    let mut inner = inner.lock().expect("not poisoned");
                     inner.handle_commands();
                     if inner.ejected() {
                         return;
@@ -206,7 +217,7 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
                             return;
                         };
 
-                        process_frames(datas, inner, channels);
+                        process_frames(datas, inner.deref_mut(), channels);
                     } else {
                         log::warn!("No buffer available");
                     }
@@ -235,7 +246,35 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
                 StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS | StreamFlags::RT_PROCESS,
                 &mut params,
             )?;
-            log::debug!("Starting Pipewire main loop");
+            log::debug!(
+                "Starting Pipewire main loop on thread {:?}",
+                thread::current().id()
+            );
+
+            // NB(strohel): this is a hack that enables processing commands (like Eject to stop the
+            // stream) even when the stream callback is not being called (perhaps because the
+            // stream is paused because the pipewire node is disconnected).
+            let timer_source = main_loop
+                .loop_()
+                .add_timer(move |_expirations_since_last_called| {
+                    log::debug!("Timer callback from thread {:?}", thread::current().id());
+                    match stream_inner.try_lock() {
+                        Ok(mut inner) => {
+                            if !inner.commands.is_empty() {
+                                log::debug!("Handling stream commands from a timer callback");
+                                inner.handle_commands();
+                            }
+                        }
+                        // Nothing to do in this case, stream callback must be holding the mutex,
+                        // no need to process the commands.
+                        Err(TryLockError::WouldBlock) => {}
+                        Err(TryLockError::Poisoned(_)) => {
+                            panic!("stream inner mutex should not be poisoned");
+                        }
+                    }
+                });
+            timer_source.update_timer(Some(Duration::from_secs(1)), Some(Duration::from_secs(1)));
+
             main_loop.run();
             Ok::<_, PipewireError>(())
         });
