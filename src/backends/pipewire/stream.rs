@@ -183,7 +183,6 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
 
             let stream = Stream::new(&core, &name, properties)?;
             config.samplerate = config.samplerate.round();
-            log::info!("strohel special interflow StreamHandle");
             let _listener = stream
                 .add_local_listener_with_user_data(StreamInner {
                     callback: None,
@@ -194,14 +193,14 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
                     timestamp: Timestamp::new(config.samplerate),
                 })
                 .process(move |stream, inner| {
-                    log::debug!("Processing stream");
+                    log::trace!("Processing stream");
                     inner.handle_commands();
                     if inner.ejected() {
                         return;
                     }
                     if let Some(mut buffer) = stream.dequeue_buffer() {
                         let datas = buffer.datas_mut();
-                        log::debug!("Datas: len={}", datas.len());
+                        log::trace!("Datas: len={}", datas.len());
 
                         if datas.is_empty() {
                             log::warn!("No datas available");
@@ -214,39 +213,38 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
                     }
                 })
                 .state_changed(|stream, _inner, state_1, state_2| {
-                    log::info!(
+                    log::debug!(
                         "strohel state_changed: {}, {state_1:?}, {state_2:?}",
                         stream.node_id()
                     );
                 })
                 .control_info(|stream, _inner, i, control| {
-                    log::info!(
+                    log::debug!(
                         "strohel control_info: {}, {i}, {control:?}",
                         stream.node_id()
                     );
                 })
                 .io_changed(|stream, _inner, i, pointer, j| {
-                    log::info!(
+                    log::debug!(
                         "strohel io_changed: {}, {i}, {pointer:?}, {j}",
                         stream.node_id()
                     );
                 })
                 .param_changed(|stream, _inner, i, pod| {
-                    log::info!(
+                    log::debug!(
                         "strohel param_changed: {}, {i}, pod omitted",
                         stream.node_id()
                     );
                 })
                 .add_buffer(|stream, _inner, buffer| {
-                    log::info!("strohel add_buffer: {}, {buffer:?}", stream.node_id());
+                    log::debug!("strohel add_buffer: {}, {buffer:?}", stream.node_id());
                 })
                 .remove_buffer(|stream, _inner, buffer| {
-                    log::info!("strohel remove_buffer: {}, {buffer:?}", stream.node_id());
+                    log::debug!("strohel remove_buffer: {}, {buffer:?}", stream.node_id());
                 })
                 .drained(|stream, _inner| {
-                    log::info!("strohel drained: {}", stream.node_id());
+                    log::debug!("strohel drained: {}", stream.node_id());
                 })
-                // drained()
                 .register()?;
             let values = pipewire::spa::pod::serialize::PodSerializer::serialize(
                 std::io::Cursor::new(Vec::new()),
@@ -275,7 +273,7 @@ impl<Callback: 'static + Send> StreamHandle<Callback> {
 
             let timer_source = main_loop
                 .loop_()
-                .add_timer(|n| log::info!("strohel timer fired, n: {n})"));
+                .add_timer(|n| log::debug!("strohel timer fired, n: {n})"));
             timer_source.update_timer(Some(Duration::from_secs(1)), Some(Duration::from_secs(1)));
 
             main_loop.run();
