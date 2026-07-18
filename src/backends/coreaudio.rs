@@ -376,6 +376,13 @@ impl<Callback: 'static + Send + AudioInputCallback> CoreAudioStream<Callback> {
                 sender.send(callback.take().unwrap()).unwrap();
                 return Err(());
             }
+            // The device's I/O buffer size can be renegotiated at runtime (e.g. on a
+            // route change), in which case `num_frames` may exceed the capacity queried
+            // at stream creation. Grow the staging buffer instead of panicking in the
+            // slice below; reallocation only happens on that cold path.
+            if args.num_frames > buffer.num_samples() {
+                buffer = AudioBuffer::zeroed(stream_config.channels.count(), args.num_frames);
+            }
             let mut buffer = buffer.slice_mut(..args.num_frames);
             for (out, inp) in buffer
                 .as_interleaved_mut()
@@ -437,6 +444,11 @@ impl<Callback: 'static + Send + AudioOutputCallback> CoreAudioStream<Callback> {
             if let Ok(sender) = rx.try_recv() {
                 sender.send(callback.take().unwrap()).unwrap();
                 return Err(());
+            }
+            // See the input callback: `num_frames` may exceed the creation-time
+            // capacity after a runtime buffer-size renegotiation. Cold-path grow.
+            if args.num_frames > buffer.num_samples() {
+                buffer = AudioBuffer::zeroed(stream_config.channels.count(), args.num_frames);
             }
             let mut buffer = buffer.slice_mut(..args.num_frames);
             let timestamp =
